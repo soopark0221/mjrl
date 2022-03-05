@@ -1,5 +1,7 @@
 # RL for MuJoCo (v2 editted by Soo)
 
+TBD: we add SWAG mode
+
 This package  contains implementations of various RL algorithms for continuous control tasks simulated with [MuJoCo.](http://www.mujoco.org/)
 
 # Installation
