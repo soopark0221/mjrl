@@ -61,6 +61,20 @@ class WorldModel:
         s_next = self.dynamics_net.forward(s, a)
         s_next = s_next.to('cpu').data.numpy()
         return s_next
+    
+    def swag_predict(self, param_dict, s, a):
+        preds = []
+        s = torch.from_numpy(s).float()
+        a = torch.from_numpy(a).float()
+        s = s.to(self.device)
+        a = a.to(self.device)
+
+        for i in range(10):
+            sample(self.dynamics_net, param_dict, diag_noise = True, device=self.device)
+            s_next = self.dynamics_net.forward(s, a)
+            s_next = s_next.to('cpu').data.numpy()
+            preds.append(s_next)
+        return preds
 
     def reward(self, s, a):
         if not self.learn_reward:
@@ -472,8 +486,8 @@ def fit_model_swag(swag_start, swag_c_epochs, max_rank, nn_model, X, Y, optimize
             dev_vector = w-first_moment
             if rank.item() + 1 > max_rank:
                 cov_mat_sqrt = cov_mat_sqrt[1:, :]
-                cov_mat_sqrt = torch.cat((cov_mat_sqrt, dev_vector.view(1, -1)), dim=0)
-                rank = torch.min(rank + 1, torch.as_tensor(max_rank)).view(-1)
+            cov_mat_sqrt = torch.cat((cov_mat_sqrt, dev_vector.view(1, -1)), dim=0)
+            rank = torch.min(rank + 1, torch.as_tensor(max_rank)).view(-1)
         if steps_so_far >= max_steps:
             print("Number of grad steps exceeded threshold. Terminating early..")
             break
@@ -483,3 +497,24 @@ def fit_model_swag(swag_start, swag_c_epochs, max_rank, nn_model, X, Y, optimize
     param_dict['D'] = cov_mat_sqrt
     param_dict['K'] = max_rank   
     return epoch_losses, param_dict
+
+
+def set_weights(model, vector, device=None):
+    offset = 0
+    for param in model.parameters():
+        param.data.copy_(vector[offset:offset + param.numel()].view(param.size()).to(device))
+        offset += param.numel()
+
+def sample(nn_model, param_dict, diag_noise = True, device=None):
+    new_d = param_dict['D']/(param_dict['K'] - 1) ** 0.5
+    variance = torch.clamp(param_dict['sigma_diag'], 1e-6)
+    z2 = torch.randn(param_dict['K'])
+    z = new_d.t() @ z2
+    if diag_noise:
+        z+= variance.sqrt()*torch.randn_like(variance)
+    z*= 1/(2**0.5)
+    sample = param_dict['theta_swa'] + z
+    set_weights(nn_model, sample, device)
+
+    return sample
+
