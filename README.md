@@ -1,4 +1,4 @@
-# RL for MuJoCo
+# RL for MuJoCo (v2 editted by Soo)
 
 This package  contains implementations of various RL algorithms for continuous control tasks simulated with [MuJoCo.](http://www.mujoco.org/)
 
