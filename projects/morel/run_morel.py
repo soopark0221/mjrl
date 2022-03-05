@@ -37,6 +37,7 @@ parser = argparse.ArgumentParser(description='Model accelerated policy optimizat
 parser.add_argument('--output', '-o', type=str, required=True, help='location to store results')
 parser.add_argument('--config', '-c', type=str, required=True, help='path to config file with exp params')
 parser.add_argument('--include', '-i', type=str, required=False, help='package to import')
+parser.add_argument('--mdl', default = 'ensemble', type=str)
 args = parser.parse_args()
 OUT_DIR = args.output
 if not os.path.exists(OUT_DIR): os.mkdir(OUT_DIR)
@@ -141,12 +142,14 @@ else:
                     init_log_std=job_data['init_log_std'], min_log_std=job_data['min_log_std'])
 
 baseline = MLPBaseline(e.spec, reg_coef=1e-3, batch_size=256, epochs=1,  learn_rate=1e-3,
-                       device=job_data['device'])               
-agent = ModelBasedNPG(learned_model=models, env=e, policy=policy, baseline=baseline, seed=SEED,
+                       device=job_data['device'])
+if args.mdl == 'ensemble':               
+    agent = ModelBasedNPG(learned_model=models, env=e, policy=policy, baseline=baseline, seed=SEED,
                       normalized_step_size=job_data['step_size'], save_logs=True, 
                       reward_function=reward_function, termination_function=termination_function,
                       **job_data['npg_hp'])
-
+elif args.mdl == 'swag':
+    pass
 # ===============================================================================
 # Model training loop
 # ===============================================================================
@@ -196,14 +199,19 @@ logger.log_kv('act_repeat', job_data['act_repeat']) # log action repeat for comp
 # Pessimistic MDP parameters
 # ===============================================================================
 
-delta = np.zeros(s.shape[0])
-for idx_1, model_1 in enumerate(models):
-    pred_1 = model_1.predict(s, a)
-    for idx_2, model_2 in enumerate(models):
-        if idx_2 > idx_1:
-            pred_2 = model_2.predict(s, a)
-            disagreement = np.linalg.norm((pred_1-pred_2), axis=-1)
-            delta = np.maximum(delta, disagreement)
+if args.mdl == 'ensemble':
+    delta = np.zeros(s.shape[0])
+    for idx_1, model_1 in enumerate(models):
+        pred_1 = model_1.predict(s, a)
+        for idx_2, model_2 in enumerate(models):
+            if idx_2 > idx_1:
+                pred_2 = model_2.predict(s, a)
+                disagreement = np.linalg.norm((pred_1-pred_2), axis=-1)
+                delta = np.maximum(delta, disagreement)
+elif args.mdl == 'swag':
+    pass
+elif args.mdl == 'swag_ens':
+    pass
 
 if 'pessimism_coef' in job_data.keys():
     if job_data['pessimism_coef'] is None or job_data['pessimism_coef'] == 0.0:

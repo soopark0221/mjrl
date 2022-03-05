@@ -37,6 +37,7 @@ parser = argparse.ArgumentParser(description='Model accelerated policy optimizat
 parser.add_argument('--output', '-o', type=str, required=True, help='location to store the model pickle file')
 parser.add_argument('--config', '-c', type=str, required=True, help='path to config file with exp params')
 parser.add_argument('--include', '-i', type=str, required=False, help='package to import')
+parser.add_argument('--mdl', default='ensemble', type=str)
 args = parser.parse_args()
 with open(args.config, 'r') as f:
     job_data = eval(f.read())
@@ -78,10 +79,15 @@ sp = np.concatenate([p['observations'][1:] for p in paths])
 r = np.concatenate([p['rewards'][:-1] for p in paths])
 rollout_score = np.mean([np.sum(p['rewards']) for p in paths])
 num_samples = np.sum([p['rewards'].shape[0] for p in paths])
-for i, model in enumerate(models):
-    dynamics_loss = model.fit_dynamics(s, a, sp, **job_data)
-    loss_general = model.compute_loss(s, a, sp) # generalization error
-    if job_data['learn_reward']:
-        reward_loss = model.fit_reward(s, a, r.reshape(-1, 1), **job_data)
 
+if args.mdl == 'ensemble': 
+    for i, model in enumerate(models):
+        dynamics_loss = model.fit_dynamics(s, a, sp, **job_data)
+        loss_general = model.compute_loss(s, a, sp) # generalization error
+        if job_data['learn_reward']:
+            reward_loss = model.fit_reward(s, a, r.reshape(-1, 1), **job_data)
+elif args.mdl == 'swag':
+    pass
+elif args.mdl == 'swag_ens':
+    pass
 pickle.dump(models, open(args.output, 'wb'))
