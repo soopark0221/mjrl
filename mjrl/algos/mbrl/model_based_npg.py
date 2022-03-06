@@ -187,7 +187,17 @@ class ModelBasedNPG(NPG):
                         for j in range(len(pred)):
                             if j>i:
                                 dis = np.linalg.norm((pred[i]-pred[j]), axis=-1)
-                                delta = np.maximum(delta, dis)                
+                                delta = np.maximum(delta, dis)               
+                    violations = np.where(pred_err > truncate_lim)[0]
+                    truncated = (not len(violations) == 0)
+                    T = violations[0] + 1 if truncated else path['observations'].shape[0]
+                    T_avg += T
+                    T = max(4, T)   # we don't want corner cases of very short truncation
+                    path["observations"] = path["observations"][:T]
+                    path["actions"] = path["actions"][:T]
+                    path["rewards"] = path["rewards"][:T]
+                    if truncated: path["rewards"][-1] += truncate_reward
+                    path["terminated"] = False if T == path['observations'].shape[0] else True    
 
         if self.save_logs:
             self.logger.log_kv('time_sampling', timer.time() - ts)
