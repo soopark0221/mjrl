@@ -38,6 +38,8 @@ parser.add_argument('--output', '-o', type=str, required=True, help='location to
 parser.add_argument('--config', '-c', type=str, required=True, help='path to config file with exp params')
 parser.add_argument('--include', '-i', type=str, required=False, help='package to import')
 parser.add_argument('--mdl', default = 'ensemble', type=str)
+parser.add_argument('--param_dict_fname', default='param_dict', type=str)
+
 args = parser.parse_args()
 OUT_DIR = args.output
 if not os.path.exists(OUT_DIR): os.mkdir(OUT_DIR)
@@ -208,10 +210,21 @@ if args.mdl == 'ensemble':
                 pred_2 = model_2.predict(s, a)
                 disagreement = np.linalg.norm((pred_1-pred_2), axis=-1)
                 delta = np.maximum(delta, disagreement)
+                print(pred_1)
+                break
 elif args.mdl == 'swag':
-    pass
+    param_dict = pickle.load(open(args.param_dict_fname, 'rb'))
+    pred = models[0].swag_predict(param_dict, s, a)
+    #print(f'swag pred result is {pred}, len is {len(pred)}')
+    delta = np.zeros(s.shape[0])
+    for i in range(len(pred)):
+        for j in range(len(pred)):
+            if j>i:
+                dis = np.linalg.norm((pred[i]-pred[j]), axis=-1)
+                delta = np.maximum(delta, dis)
 elif args.mdl == 'swag_ens':
     pass
+print(f'delta is {delta}, len delta is {len(delta)}')
 
 if 'pessimism_coef' in job_data.keys():
     if job_data['pessimism_coef'] is None or job_data['pessimism_coef'] == 0.0:
