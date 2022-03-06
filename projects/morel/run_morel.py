@@ -39,6 +39,7 @@ parser.add_argument('--config', '-c', type=str, required=True, help='path to con
 parser.add_argument('--include', '-i', type=str, required=False, help='package to import')
 parser.add_argument('--mdl', default = 'ensemble', type=str)
 parser.add_argument('--param_dict_fname', default='param_dict', type=str)
+parser.add_argument('--pess', default=3.0, type=float)
 
 args = parser.parse_args()
 OUT_DIR = args.output
@@ -109,6 +110,7 @@ if 'reward_file' in job_data.keys():
     exec("from "+filename+" import *")
 if 'reward_function' not in globals():
     reward_function = getattr(e.env.env, "compute_path_rewards", None)
+    print(f'reward_function is {reward_function}')
     job_data['learn_reward'] = False if reward_function is not None else True
 if 'termination_function' not in globals():
     termination_function = getattr(e.env.env, "truncate_paths", None)
@@ -149,9 +151,14 @@ if args.mdl == 'ensemble':
     agent = ModelBasedNPG(learned_model=models, env=e, policy=policy, baseline=baseline, seed=SEED,
                       normalized_step_size=job_data['step_size'], save_logs=True, 
                       reward_function=reward_function, termination_function=termination_function,
+                      mdl=args.mdl, param_dict_fname=None,
                       **job_data['npg_hp'])
 elif args.mdl == 'swag':
-    pass
+    agent = ModelBasedNPG(learned_model=models, env=e, policy=policy, baseline=baseline, seed=SEED,
+                      normalized_step_size=job_data['step_size'], save_logs=True, 
+                      reward_function=reward_function, termination_function=termination_function,
+                      mdl=args.mdl, param_dict_fname=args.param_dict_fname,
+                      **job_data['npg_hp'])
 # ===============================================================================
 # Model training loop
 # ===============================================================================
@@ -231,7 +238,9 @@ if 'pessimism_coef' in job_data.keys():
         truncate_lim = None
         print("No pessimism used. Running naive MBRL.")
     else:
-        truncate_lim = (1.0 / job_data['pessimism_coef']) * np.max(delta)
+        #truncate_lim = (1.0 / job_data['pessimism_coef']) * np.max(delta)
+        truncate_lim = (1.0 / args.pess) * np.max(delta)
+
         print("Maximum error before truncation (i.e. unknown region threshold) = %f" % truncate_lim)
     job_data['truncate_lim'] = truncate_lim
     job_data['truncate_reward'] = job_data['truncate_reward'] if 'truncate_reward' in job_data.keys() else 0.0
