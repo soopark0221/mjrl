@@ -28,6 +28,8 @@ def policy_rollout(
         a_min=None,
         a_max=None,
         large_value=float(1e2),
+        mdl = None,
+        param_dict = None
         ):
     
     # Only CPU rollouts are currently supported.
@@ -76,11 +78,17 @@ def policy_rollout(
             at = at + torch.randn(at.shape).to(policy.device) * torch.exp(policy.log_std)
         # clamp states and actions to avoid blowup
         at = enforce_tensor_bounds(at, a_min, a_max, large_value)
-        stp1 = learned_model.forward(st, at)
+        if mdl == 'ensemble' or mdl == 'swag_ens':
+            stp1 = learned_model.forward(st, at)
+        elif mdl == 'swag':
+            stp1 = learned_model.forward_swag(st, at, param_dict)
+
         stp1 = enforce_tensor_bounds(stp1, s_min, s_max, large_value)
         obs.append(st.to('cpu').data.numpy())
         act.append(at.to('cpu').data.numpy())
         st = stp1
+
+
 
     obs = np.array(obs)
     obs = np.swapaxes(obs, 0, 1)  # (num_traj, horizon, state_dim)
