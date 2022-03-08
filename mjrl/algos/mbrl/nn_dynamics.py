@@ -53,6 +53,17 @@ class WorldModel:
         a = a.to(self.device)
         return self.dynamics_net.forward(s, a)
 
+    def forward_swag(self, s, a, param_dict):
+        if type(s) == np.ndarray:
+            s = torch.from_numpy(s).float()
+        if type(a) == np.ndarray:
+            a = torch.from_numpy(a).float()
+        s = s.to(self.device)
+        a = a.to(self.device)
+        sample(self.dynamics_net, param_dict, diag_noise = True, device=self.device)
+        return self.dynamics_net.forward(s, a)
+
+
     def predict(self, s, a):
         s = torch.from_numpy(s).float()
         a = torch.from_numpy(a).float()
@@ -69,7 +80,7 @@ class WorldModel:
         s = s.to(self.device)
         a = a.to(self.device)
 
-        for i in range(10):
+        for i in range(4):
             sample(self.dynamics_net, param_dict, diag_noise = True, device=self.device)
             s_next = self.dynamics_net.forward(s, a)
             s_next = s_next.to('cpu').data.numpy()
