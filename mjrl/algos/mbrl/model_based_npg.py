@@ -43,7 +43,8 @@ class ModelBasedNPG(NPG):
         self.reward_function, self.termination_function = reward_function, termination_function
         self.mdl = mdl
         self.param_dict_fname = param_dict_fname
-
+        if self.param_dict_fname:
+            self.param_dict = pickle.load(open(self.param_dict_fname, 'rb'))
     def to(self, device):
         # Convert all the networks (except policy network which is clamped to CPU)
         # to the specified device
@@ -110,26 +111,52 @@ class ModelBasedNPG(NPG):
 
         # set policy device to be same as learned model
         self.policy.to(self.learned_model[0].device)
+        if self.mdl == 'ensemble' or self.mdl == 'swag_ens':
 
-        for model in self.learned_model:
-            # dont set seed explicitly -- this will make rollouts follow tne global seed
-            rollouts = policy_rollout(num_traj=N, env=env, policy=self.policy,
-                                      learned_model=model, eval_mode=False, horizon=horizon,
-                                      init_state=init_states, seed=None)
-            # use learned reward function if available
-            if model.learn_reward:
-                model.compute_path_rewards(rollouts)
-            else:
-               rollouts = reward_function(rollouts)
-               # scale by action repeat if necessary
-               rollouts["rewards"] = rollouts["rewards"] * env.act_repeat
-            num_traj, horizon, state_dim = rollouts['observations'].shape
-            for i in range(num_traj):
-                path = dict()
-                for key in rollouts.keys():
-                    path[key] = rollouts[key][i, ...]
-                paths.append(path)
+            for model in self.learned_model:
+                # dont set seed explicitly -- this will make rollouts follow tne global seed
+                rollouts = policy_rollout(num_traj=N, env=env, policy=self.policy,
+                                        learned_model=model, eval_mode=False, horizon=horizon,
+                                        init_state=init_states, seed=None, mdl=self.mdl)
+                #print(f'roll {rollouts}')
+                print(f'roll {rollouts["observations"].shape}')
 
+                # use learned reward function if available
+                if model.learn_reward:
+                    model.compute_path_rewards(rollouts)
+                else:
+                    rollouts = reward_function(rollouts)
+                    # scale by action repeat if necessary
+                    rollouts["rewards"] = rollouts["rewards"] * env.act_repeat
+                num_traj, horizon, state_dim = rollouts['observations'].shape
+                for i in range(num_traj):
+                    path = dict()
+                    for key in rollouts.keys():
+                        path[key] = rollouts[key][i, ...]
+                    paths.append(path)
+
+        elif self.mdl == 'swag':
+            for i in range(4):
+                rollouts = policy_rollout(num_traj=N, env=env, policy=self.policy,
+                                        learned_model=self.learned_model[0], eval_mode=False, horizon=horizon,
+                                        init_state=init_states, seed=None, mdl=self.mdl, param_dict=self.param_dict)
+                #print(f'roll {rollouts}')
+                print(f'roll {rollouts["observations"].shape}')
+
+                # use learned reward function if available
+                if self.learned_model[0].learn_reward:
+                    self.learned_model[0].compute_path_rewards(rollouts)
+                else:
+                    rollouts = reward_function(rollouts)
+                    # scale by action repeat if necessary
+                    rollouts["rewards"] = rollouts["rewards"] * env.act_repeat
+                num_traj, horizon, state_dim = rollouts['observations'].shape
+                for i in range(num_traj):
+                    path = dict()
+                    for key in rollouts.keys():
+                        path[key] = rollouts[key][i, ...]
+                    paths.append(path)          
+        print(f'len path {len(paths)}')
         # NOTE: If tasks have termination condition, we will assume that the env has
         # a function that can terminate paths appropriately.
         # Otherwise, termination is not considered.
@@ -145,8 +172,9 @@ class ModelBasedNPG(NPG):
 
         T_avg = 0
         # additional truncation based on error in the ensembles
-        if self.mdl == 'ensemble':
+        if self.mdl == 'ensemble' or self.mdl == 'swag_ens':
             if truncate_lim is not None and len(self.learned_model) > 1:
+                print(self.mdl, len(self.learned_model))
                 for path in paths:
                     pred_err = np.zeros(path['observations'].shape[0] - 1)
                     s = path['observations'][:-1]
@@ -179,18 +207,18 @@ class ModelBasedNPG(NPG):
                     s = path['observations'][:-1]
                     a = path['actions'][:-1]
                     s_next = path['observations'][1:]
-                    param_dict = pickle.load(open(self.param_dict_fname, 'rb'))
-                    pred = self.learned_model[0].swag_predict(param_dict, s, a)
+                    #param_dict = pickle.load(open(self.param_dict_fname, 'rb'))
+                    pred = self.learned_model[0].swag_predict(self.param_dict, s, a)
                     #print(f'swag pred result is {pred}, len is {len(pred)}')
-                    delta = np.zeros(s.shape[0])
                     for i in range(len(pred)):
                         for j in range(len(pred)):
                             if j>i:
                                 dis = np.linalg.norm((pred[i]-pred[j]), axis=-1)
-                                delta = np.maximum(delta, dis)               
+                                pred_err = np.maximum(pred_err, dis)               
                     violations = np.where(pred_err > truncate_lim)[0]
                     truncated = (not len(violations) == 0)
                     T = violations[0] + 1 if truncated else path['observations'].shape[0]
+                    #T = path['observations'].shape[0]
                     T_avg += T
                     T = max(4, T)   # we don't want corner cases of very short truncation
                     path["observations"] = path["observations"][:T]
@@ -201,7 +229,10 @@ class ModelBasedNPG(NPG):
 
         if self.save_logs:
             self.logger.log_kv('time_sampling', timer.time() - ts)
-        T_avg /= len(paths)
+        try: 
+            T_avg /= len(paths)
+        except :
+            print('path error')
         print(f'T_avg = {T_avg}')
         self.seed = self.seed + N if self.seed is not None else self.seed
 
