@@ -26,7 +26,7 @@ from mjrl.baselines.quadratic_baseline import QuadraticBaseline
 from mjrl.utils.gym_env import GymEnv
 from mjrl.utils.logger import DataLog
 from mjrl.utils.make_train_plots import make_train_plots
-from mjrl.algos.mbrl.nn_dynamics import WorldModel
+from mjrl.algos.mbrl.nn_dynamics import WorldModel, sample, set_weights
 from mjrl.algos.mbrl.model_based_npg import ModelBasedNPG
 from mjrl.algos.mbrl.sampling import sample_paths, evaluate_policy
 
@@ -39,7 +39,7 @@ parser.add_argument('--output', '-o', type=str, required=True, help='location to
 parser.add_argument('--config', '-c', type=str, required=True, help='path to config file with exp params')
 parser.add_argument('--include', '-i', type=str, required=False, help='package to import')
 parser.add_argument('--mdl', default='ensemble', type=str)
-parser.add_argument('--param_dict_fname', default='param_dict', type=Str)
+parser.add_argument('--param_dict_fname', default='param_dict', type=str)
 args = parser.parse_args()
 with open(args.config, 'r') as f:
     job_data = eval(f.read())
@@ -91,14 +91,16 @@ if args.mdl == 'ensemble':
 elif args.mdl == 'swag':
     for i, model in enumerate(models):
         dynamics_loss, param_dict = model.fit_dynamics_swag(s, a, sp, **job_data)
+        print(f'swa {param_dict["theta_swa"].shape}, sigma_diag {param_dict["sigma_diag"].shape}, D {param_dict["D"].shape},K {param_dict["K"]}')
+        pickle.dump(param_dict, open(args.param_dict_fname, 'wb'))
         loss_general = model.compute_loss(s, a, sp) # generalization error
         if job_data['learn_reward']:
             reward_loss = model.fit_reward(s, a, r.reshape(-1, 1), **job_data)
 elif args.mdl == 'swag_ens':
-    pass
+    dynamics_loss, param_dict_ens = models[0].fit_dynamics_swag(s, a, sp, **job_data)
+    pickle.dump(param_dict_ens, open(args.param_dict_fname, 'wb'))
+    for i, model in enumerate(models):
+        sample(model.dynamics_net, param_dict_ens, diag_noise = True, device='cuda')
+        if job_data['learn_reward']:
+            reward_loss = model.fit_reward(s, a, r.reshape(-1, 1), **job_data)
 pickle.dump(models, open(args.output, 'wb'))
-try: 
-    pickle.dump(param_dict, open(args.param_dict_fname, 'wb'))
-except:
-    print('no param dict')
-
