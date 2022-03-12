@@ -28,7 +28,7 @@ from mjrl.utils.make_train_plots import make_train_plots
 from mjrl.algos.mbrl.nn_dynamics import WorldModel
 from mjrl.algos.mbrl.model_based_npg import ModelBasedNPG
 from mjrl.algos.mbrl.sampling import sample_paths, evaluate_policy
-
+import time 
 # ===============================================================================
 # Get command line arguments
 # ===============================================================================
@@ -147,7 +147,7 @@ else:
 
 baseline = MLPBaseline(e.spec, reg_coef=1e-3, batch_size=256, epochs=1,  learn_rate=1e-3,
                        device=job_data['device'])
-if args.mdl == 'ensemble':               
+if args.mdl == 'ensemble' or args.mdl == 'swag_ens':               
     agent = ModelBasedNPG(learned_model=models, env=e, policy=policy, baseline=baseline, seed=SEED,
                       normalized_step_size=job_data['step_size'], save_logs=True, 
                       reward_function=reward_function, termination_function=termination_function,
@@ -208,7 +208,7 @@ logger.log_kv('act_repeat', job_data['act_repeat']) # log action repeat for comp
 # Pessimistic MDP parameters
 # ===============================================================================
 
-if args.mdl == 'ensemble':
+if args.mdl == 'ensemble' or args.mdl == 'swag_ens':
     delta = np.zeros(s.shape[0])
     for idx_1, model_1 in enumerate(models):
         pred_1 = model_1.predict(s, a)
@@ -217,8 +217,7 @@ if args.mdl == 'ensemble':
                 pred_2 = model_2.predict(s, a)
                 disagreement = np.linalg.norm((pred_1-pred_2), axis=-1)
                 delta = np.maximum(delta, disagreement)
-                print(pred_1)
-                break
+
 elif args.mdl == 'swag':
     param_dict = pickle.load(open(args.param_dict_fname, 'rb'))
     pred = models[0].swag_predict(param_dict, s, a)
@@ -229,8 +228,7 @@ elif args.mdl == 'swag':
             if j>i:
                 dis = np.linalg.norm((pred[i]-pred[j]), axis=-1)
                 delta = np.maximum(delta, dis)
-elif args.mdl == 'swag_ens':
-    pass
+
 print(f'delta is {delta}, len delta is {len(delta)}')
 
 if 'pessimism_coef' in job_data.keys():
@@ -266,7 +264,7 @@ if 'bc_init' in job_data.keys():
 # ===============================================================================
 # Policy Optimization Loop
 # ===============================================================================
-
+policy_start = time.time()
 for outer_iter in range(job_data['num_iter']):
     ts = timer.time()
     agent.to(job_data['device'])
@@ -298,6 +296,8 @@ for outer_iter in range(job_data['num_iter']):
         # set the policy device back to CPU for env sampling
         eval_paths = evaluate_policy(agent.env, agent.policy, agent.learned_model[0], noise_level=0.0,
                                      real_step=True, num_episodes=job_data['eval_rollouts'], visualize=False)
+        print(f'len eval path {len(eval_paths)}')
+        print(f'single path reward len {len(eval_paths[0]["rewards"])}')
         eval_score = np.mean([np.sum(p['rewards']) for p in eval_paths])
         logger.log_kv('eval_score', eval_score)
         try:
@@ -337,6 +337,8 @@ for outer_iter in range(job_data['num_iter']):
         make_train_plots(log=logger.log, keys=['rollout_score', 'eval_score', 'rollout_metric', 'eval_metric'],
                          x_scale=float(job_data['act_repeat']), y_scale=1.0, save_loc=OUT_DIR+'/logs/')
 
+policy_end = time.time()
+print(f'policy time taken {policy_end-policy_start}')
 # final save
 pickle.dump(agent, open(OUT_DIR + '/iterations/agent_final.pickle', 'wb'))
 policy.set_transformations(in_scale = 1.0 / e.obs_mask)
