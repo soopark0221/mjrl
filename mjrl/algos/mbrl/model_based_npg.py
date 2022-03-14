@@ -44,7 +44,16 @@ class ModelBasedNPG(NPG):
         self.mdl = mdl
         self.param_dict_fname = param_dict_fname
         if self.param_dict_fname:
-            self.param_dict = pickle.load(open(self.param_dict_fname, 'rb'))
+            if self.mdl == 'swag' or self.mdl =='swag_ens':
+                self.param_dict = pickle.load(open(self.param_dict_fname, 'rb'))
+            elif self.mdl == 'multiswag':
+                #file_names = [fn for fn in os.listdir('.') if any(fn.startswith('param_dict_multiswag'))]
+                self.param_dict1 = pickle.load(open(f'{self.param_dict_fname}{0}', 'rb'))
+                self.param_dict2 = pickle.load(open(f'{self.param_dict_fname}{1}', 'rb'))
+                self.param_dict3 = pickle.load(open(f'{self.param_dict_fname}{2}', 'rb'))
+                self.param_dict4 = pickle.load(open(f'{self.param_dict_fname}{3}', 'rb'))
+                self.param_dict_list = [self.param_dict1,self.param_dict2, self.param_dict3, self.param_dict4]
+
     def to(self, device):
         # Convert all the networks (except policy network which is clamped to CPU)
         # to the specified device
@@ -156,6 +165,26 @@ class ModelBasedNPG(NPG):
                     for key in rollouts.keys():
                         path[key] = rollouts[key][i, ...]
                     paths.append(path)          
+        elif self.mdl == 'multiswag':
+            for i, model in enumerate(self.learned_model):
+                for j in range(4):
+                    rollouts = policy_rollout(num_traj=N, env=env, policy=self.policy,
+                                            learned_model=model, eval_mode=False, horizon=horizon,
+                                            init_state=init_states, seed=None, mdl=self.mdl, param_dict=self.param_dict_list[i])
+                    # use learned reward function if available
+                    if model.learn_reward:
+                        model.compute_path_rewards(rollouts)
+                    else:
+                        rollouts = reward_function(rollouts)
+                        # scale by action repeat if necessary
+                        rollouts["rewards"] = rollouts["rewards"] * env.act_repeat
+                    num_traj, horizon, state_dim = rollouts['observations'].shape
+                    for k in range(num_traj):
+                        path = dict()
+                        for key in rollouts.keys():
+                            path[key] = rollouts[key][k, ...]
+                        paths.append(path)
+
         print(f'len path {len(paths)}')
         # NOTE: If tasks have termination condition, we will assume that the env has
         # a function that can terminate paths appropriately.
@@ -177,6 +206,7 @@ class ModelBasedNPG(NPG):
                 print(self.mdl, len(self.learned_model))
                 for path in paths:
                     pred_err = np.zeros(path['observations'].shape[0] - 1)
+                    print(f'pred_err initial shape {pred_err.shape}')
                     s = path['observations'][:-1]
                     a = path['actions'][:-1]
                     s_next = path['observations'][1:]
@@ -199,7 +229,7 @@ class ModelBasedNPG(NPG):
                     if truncated: path["rewards"][-1] += truncate_reward
                     path["terminated"] = False if T == path['observations'].shape[0] else True
 
-        elif self.mdl == 'swag':
+        elif self.mdl == 'swag' or self.mdl == 'multiswag':
         #swag
             if truncate_lim is not None and len(self.learned_model) > 0:
                 for path in paths:
@@ -208,7 +238,12 @@ class ModelBasedNPG(NPG):
                     a = path['actions'][:-1]
                     s_next = path['observations'][1:]
                     #param_dict = pickle.load(open(self.param_dict_fname, 'rb'))
-                    pred = self.learned_model[0].swag_predict(self.param_dict, s, a)
+                    if self.mdl == 'swag':
+                        pred = self.learned_model[0].swag_predict(self.param_dict, s, a)
+                    elif self.mdl == 'multiswag':
+                        pred = []
+                        for i, model in enumerate(self.learned_model):
+                            pred += self.learned_model[i].swag_predict(self.param_dict_list[i], s, a)
                     #print(f'swag pred result is {pred}, len is {len(pred)}')
                     for i in range(len(pred)):
                         for j in range(len(pred)):
@@ -225,7 +260,8 @@ class ModelBasedNPG(NPG):
                     path["actions"] = path["actions"][:T]
                     path["rewards"] = path["rewards"][:T]
                     if truncated: path["rewards"][-1] += truncate_reward
-                    path["terminated"] = False if T == path['observations'].shape[0] else True    
+                    path["terminated"] = False if T == path['observations'].shape[0] else True   
+            
 
         if self.save_logs:
             self.logger.log_kv('time_sampling', timer.time() - ts)
@@ -256,7 +292,7 @@ class ModelBasedNPG(NPG):
             self.logger.log_kv('VF_error_after', error_after)
         else:
             self.baseline.fit(paths)
-
+        print(eval_statistics)
         return eval_statistics
 
     def get_action(self, observation):

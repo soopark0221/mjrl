@@ -80,7 +80,7 @@ def policy_rollout(
         at = enforce_tensor_bounds(at, a_min, a_max, large_value)
         if mdl == 'ensemble' or mdl == 'swag_ens':
             stp1 = learned_model.forward(st, at)
-        elif mdl == 'swag':
+        elif mdl == 'swag' or mdl == 'multiswag':
             stp1 = learned_model.forward_swag(st, at, param_dict)
 
         stp1 = enforce_tensor_bounds(stp1, s_min, s_max, large_value)
