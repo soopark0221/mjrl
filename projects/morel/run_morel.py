@@ -153,7 +153,7 @@ if args.mdl == 'ensemble' or args.mdl == 'swag_ens':
                       reward_function=reward_function, termination_function=termination_function,
                       mdl=args.mdl, param_dict_fname=None,
                       **job_data['npg_hp'])
-elif args.mdl == 'swag':
+elif args.mdl == 'swag' or args.mdl == 'multiswag':
     agent = ModelBasedNPG(learned_model=models, env=e, policy=policy, baseline=baseline, seed=SEED,
                       normalized_step_size=job_data['step_size'], save_logs=True, 
                       reward_function=reward_function, termination_function=termination_function,
@@ -207,7 +207,7 @@ logger.log_kv('act_repeat', job_data['act_repeat']) # log action repeat for comp
 # ===============================================================================
 # Pessimistic MDP parameters
 # ===============================================================================
-
+'''
 if args.mdl == 'ensemble' or args.mdl == 'swag_ens':
     delta = np.zeros(s.shape[0])
     for idx_1, model_1 in enumerate(models):
@@ -229,7 +229,20 @@ elif args.mdl == 'swag':
                 dis = np.linalg.norm((pred[i]-pred[j]), axis=-1)
                 delta = np.maximum(delta, dis)
 
+elif args.mdl == 'multiswag':
+    delta = np.zeros(s.shape[0])
+    pred = []
+    for idx_1, model_1 in enumerate(models):
+        param_dict = pickle.load(open(f'{args.param_dict_fname}{idx_1}', 'rb'))
+        pred += models[idx_1].swag_predict(param_dict, s, a)
+    #print(f'swag pred result is {pred}, len is {len(pred)}')
+    for i in range(len(pred)):
+        for j in range(len(pred)):
+            if j>i:
+                dis = np.linalg.norm((pred[i]-pred[j]), axis=-1)
+                delta = np.maximum(delta, dis)
 print(f'delta is {delta}, len delta is {len(delta)}')
+'''
 
 if 'pessimism_coef' in job_data.keys():
     if job_data['pessimism_coef'] is None or job_data['pessimism_coef'] == 0.0:
@@ -237,7 +250,8 @@ if 'pessimism_coef' in job_data.keys():
         print("No pessimism used. Running naive MBRL.")
     else:
         #truncate_lim = (1.0 / job_data['pessimism_coef']) * np.max(delta)
-        truncate_lim = (1.0 / args.pess) * np.max(delta)
+        #truncate_lim = (1.0 / args.pess) * np.max(delta)
+        truncate_lim = 0.5
 
         print("Maximum error before truncation (i.e. unknown region threshold) = %f" % truncate_lim)
     job_data['truncate_lim'] = truncate_lim
@@ -265,6 +279,7 @@ if 'bc_init' in job_data.keys():
 # Policy Optimization Loop
 # ===============================================================================
 policy_start = time.time()
+print('policy start')
 for outer_iter in range(job_data['num_iter']):
     ts = timer.time()
     agent.to(job_data['device'])
