@@ -70,7 +70,13 @@ class ModelBasedNPG(NPG):
         model_cuda = any(model_cuda)
         baseline_cuda = next(self.baseline.model.parameters()).is_cuda
         return any([model_cuda, baseline_cuda])
-
+    
+    def dict_mean(self, dict_list):
+        mean_dict = {}
+        for key in dict_list[0].keys():
+            mean_dict[key] = np.mean([d[key] for d in dict_list], axis=0)
+        return mean_dict
+    
     def train_step(self, N,
                    env=None,
                    sample_mode='trajectories',
@@ -166,11 +172,13 @@ class ModelBasedNPG(NPG):
                         path[key] = rollouts[key][i, ...]
                     paths.append(path)          
         elif self.mdl == 'multiswag':
+            print(f' num of learned model {len(self.learned_model)}')
             for i, model in enumerate(self.learned_model):
-                for j in range(4):
+                for j in range(10):
                     rollouts = policy_rollout(num_traj=N, env=env, policy=self.policy,
                                             learned_model=model, eval_mode=False, horizon=horizon,
                                             init_state=init_states, seed=None, mdl=self.mdl, param_dict=self.param_dict_list[i])
+                    #print(f'rollouts {rollouts}')
                     # use learned reward function if available
                     if model.learn_reward:
                         model.compute_path_rewards(rollouts)
@@ -184,6 +192,7 @@ class ModelBasedNPG(NPG):
                         for key in rollouts.keys():
                             path[key] = rollouts[key][k, ...]
                         paths.append(path)
+        
 
         print(f'len path {len(paths)}')
         # NOTE: If tasks have termination condition, we will assume that the env has
@@ -201,6 +210,7 @@ class ModelBasedNPG(NPG):
 
         T_avg = 0
         # additional truncation based on error in the ensembles
+        '''
         if self.mdl == 'ensemble' or self.mdl == 'swag_ens':
             if truncate_lim is not None and len(self.learned_model) > 1:
                 print(self.mdl, len(self.learned_model))
@@ -208,6 +218,7 @@ class ModelBasedNPG(NPG):
                     pred_err = np.zeros(path['observations'].shape[0] - 1)
                     print(f'pred_err initial shape {pred_err.shape}')
                     s = path['observations'][:-1]
+
                     a = path['actions'][:-1]
                     s_next = path['observations'][1:]
                     for idx_1, model_1 in enumerate(self.learned_model):
@@ -237,13 +248,14 @@ class ModelBasedNPG(NPG):
                     s = path['observations'][:-1]
                     a = path['actions'][:-1]
                     s_next = path['observations'][1:]
+
                     #param_dict = pickle.load(open(self.param_dict_fname, 'rb'))
                     if self.mdl == 'swag':
                         pred = self.learned_model[0].swag_predict(self.param_dict, s, a)
                     elif self.mdl == 'multiswag':
                         pred = []
                         for i, model in enumerate(self.learned_model):
-                            pred += self.learned_model[i].swag_predict(self.param_dict_list[i], s, a)
+                            pred +=model.swag_predict(self.param_dict_list[i], s, a)
                     #print(f'swag pred result is {pred}, len is {len(pred)}')
                     for i in range(len(pred)):
                         for j in range(len(pred)):
@@ -262,14 +274,14 @@ class ModelBasedNPG(NPG):
                     if truncated: path["rewards"][-1] += truncate_reward
                     path["terminated"] = False if T == path['observations'].shape[0] else True   
             
-
+        '''
         if self.save_logs:
             self.logger.log_kv('time_sampling', timer.time() - ts)
         try: 
             T_avg /= len(paths)
+            print(f'T_avg = {T_avg}')
         except :
             print('path error')
-        print(f'T_avg = {T_avg}')
         self.seed = self.seed + N if self.seed is not None else self.seed
 
         # compute returns

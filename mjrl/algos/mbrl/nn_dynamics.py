@@ -53,14 +53,14 @@ class WorldModel:
         a = a.to(self.device)
         return self.dynamics_net.forward(s, a)
 
-    def forward_swag(self, s, a, param_dict):
+    def forward_swag(self, s, a, param_dict, diag_noise = True):
         if type(s) == np.ndarray:
             s = torch.from_numpy(s).float()
         if type(a) == np.ndarray:
             a = torch.from_numpy(a).float()
         s = s.to(self.device)
         a = a.to(self.device)
-        sample(self.dynamics_net, param_dict, diag_noise = True, device=self.device)
+        sample(self.dynamics_net, param_dict, diag_noise, device=self.device)
         return self.dynamics_net.forward(s, a)
 
 
@@ -464,7 +464,8 @@ def fit_model_swag(swag_start, swag_c_epochs, max_rank, nn_model, X, Y, optimize
     num_samples = Y.shape[0]
     epoch_losses = []
     steps_so_far = 0
-    first_moment = flatten([param.detach().cpu() for param in nn_model.parameters()])
+    num_param =  sum(param.numel() for param in nn_model.parameters())
+    first_moment = torch.zeros(num_param) #flatten([param.detach().cpu() for param in nn_model.parameters()]) # torch.zeros(num_param) 275979
     second_moment = torch.square(first_moment)
     cov_mat_sqrt = np.empty((first_moment.shape[0], 0)) #numpy 
     cov_mat_sqrt = torch.empty(0, first_moment.shape[0], dtype=torch.float32) # tensor
@@ -502,11 +503,27 @@ def fit_model_swag(swag_start, swag_c_epochs, max_rank, nn_model, X, Y, optimize
         if steps_so_far >= max_steps:
             print("Number of grad steps exceeded threshold. Terminating early..")
             break
+        #print(loss)
     param_dict = {}
     param_dict['theta_swa'] = first_moment
     param_dict['sigma_diag'] = second_moment - first_moment**2
     param_dict['D'] = cov_mat_sqrt
-    param_dict['K'] = max_rank   
+    param_dict['K'] = max_rank  
+    
+    
+    # evaluation
+    num_steps = int(num_samples // batch_size)
+    val_avg_loss = 0
+    for mb in range(num_steps):
+        data_idx = rand_idx[mb*batch_size:(mb+1)*batch_size]
+        batch_X  = [d[data_idx] for d in X]
+        batch_Y  = Y[data_idx]
+        sample(nn_model,param_dict)
+        Y_hat    = nn_model.forward(*batch_X)
+        val_loss = loss_func(Y_hat, batch_Y)
+        print(f'validation loss {val_loss}')
+        val_avg_loss += val_loss
+    print(f'val avg loss {val_avg_loss/num_steps}')
     return epoch_losses, param_dict
 
 
@@ -516,16 +533,18 @@ def set_weights(model, vector, device=None):
         param.data.copy_(vector[offset:offset + param.numel()].view(param.size()).to(device))
         offset += param.numel()
 
-def sample(nn_model, param_dict, diag_noise = True, device=None):
-    new_d = param_dict['D']/(param_dict['K'] - 1) ** 0.5
+
+def sample(nn_model, param_dict, diag_noise = False, device=None):
+    new_d = param_dict['D']/((param_dict['K'] - 1) ** 0.5)
     variance = torch.clamp(param_dict['sigma_diag'], 1e-6)
     z2 = torch.randn(param_dict['K'])
     z = new_d.t() @ z2
     if diag_noise:
+        #diag = variance.sqrt()*torch.randn_like(variance)
         z+= variance.sqrt()*torch.randn_like(variance)
-    z*= 1/(2**0.5)
-    sample = param_dict['theta_swa'] + z
-    set_weights(nn_model, sample, device)
+    z*= 1/(2**0.5) #could change 2
+    #diag *= 1/(2**0.5)
+    new_w = param_dict['theta_swa'] + z
+    set_weights(nn_model, new_w, device)
 
-    return sample
 

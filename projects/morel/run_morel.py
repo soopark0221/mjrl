@@ -125,6 +125,7 @@ if job_data['model_file'] is not None:
     models = pickle.load(open(job_data['model_file'], 'rb'))
 else:
     model_trained = False
+    print(f'num models {job_data["num_models"]}')
     models = [WorldModel(state_dim=e.observation_dim, act_dim=e.action_dim, seed=SEED+i, 
                      **job_data) for i in range(job_data['num_models'])]
 
@@ -182,6 +183,7 @@ try:
     logger.log_kv('rollout_metric', rollout_metric)
 except:
     pass
+'''
 if not model_trained:
     for i, model in enumerate(models):
         dynamics_loss = model.fit_dynamics(s, a, sp, **job_data)
@@ -194,7 +196,8 @@ if not model_trained:
 else:
     for i, model in enumerate(models):
         loss_general = model.compute_loss(s, a, sp)
-        logger.log_kv('dyn_loss_gen_' + str(i), loss_general)
+        #logger.log_kv('dyn_loss_gen_' + str(i), loss_general)
+'''
 tf = timer.time()
 logger.log_kv('model_learning_time', tf-ts)
 print("Model learning statistics")
@@ -207,7 +210,6 @@ logger.log_kv('act_repeat', job_data['act_repeat']) # log action repeat for comp
 # ===============================================================================
 # Pessimistic MDP parameters
 # ===============================================================================
-'''
 if args.mdl == 'ensemble' or args.mdl == 'swag_ens':
     delta = np.zeros(s.shape[0])
     for idx_1, model_1 in enumerate(models):
@@ -232,9 +234,9 @@ elif args.mdl == 'swag':
 elif args.mdl == 'multiswag':
     delta = np.zeros(s.shape[0])
     pred = []
-    for idx_1, model_1 in enumerate(models):
+    for idx_1, model in enumerate(models):
         param_dict = pickle.load(open(f'{args.param_dict_fname}{idx_1}', 'rb'))
-        pred += models[idx_1].swag_predict(param_dict, s, a)
+        pred += model.swag_predict(param_dict, s, a)
     #print(f'swag pred result is {pred}, len is {len(pred)}')
     for i in range(len(pred)):
         for j in range(len(pred)):
@@ -242,17 +244,13 @@ elif args.mdl == 'multiswag':
                 dis = np.linalg.norm((pred[i]-pred[j]), axis=-1)
                 delta = np.maximum(delta, dis)
 print(f'delta is {delta}, len delta is {len(delta)}')
-'''
-
 if 'pessimism_coef' in job_data.keys():
     if job_data['pessimism_coef'] is None or job_data['pessimism_coef'] == 0.0:
         truncate_lim = None
         print("No pessimism used. Running naive MBRL.")
     else:
         #truncate_lim = (1.0 / job_data['pessimism_coef']) * np.max(delta)
-        #truncate_lim = (1.0 / args.pess) * np.max(delta)
-        truncate_lim = 0.5
-
+        truncate_lim = (1.0 / args.pess) * np.max(delta)
         print("Maximum error before truncation (i.e. unknown region threshold) = %f" % truncate_lim)
     job_data['truncate_lim'] = truncate_lim
     job_data['truncate_reward'] = job_data['truncate_reward'] if 'truncate_reward' in job_data.keys() else 0.0
@@ -309,7 +307,9 @@ for outer_iter in range(job_data['num_iter']):
     if job_data['eval_rollouts'] > 0:
         print("Performing validation rollouts ... ")
         # set the policy device back to CPU for env sampling
-        eval_paths = evaluate_policy(agent.env, agent.policy, agent.learned_model[0], noise_level=0.0,
+        #eval_paths = evaluate_policy(agent.env, agent.policy, agent.learned_model[0], noise_level=0.0,
+        #                             real_step=True, num_episodes=job_data['eval_rollouts'], visualize=False)
+        eval_paths = evaluate_policy(agent.env, agent.policy, agent.learned_model, noise_level=0.0,
                                      real_step=True, num_episodes=job_data['eval_rollouts'], visualize=False)
         print(f'len eval path {len(eval_paths)}')
         print(f'single path reward len {len(eval_paths[0]["rewards"])}')

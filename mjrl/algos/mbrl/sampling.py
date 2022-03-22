@@ -7,6 +7,7 @@ import multiprocessing as mp
 import time as timer
 import torch
 logging.disable(logging.CRITICAL)
+from mjrl.algos.mbrl.nn_dynamics import sample
 
 
 # ===========================================================
@@ -70,6 +71,8 @@ def policy_rollout(
     obs = []
     act = []
     st = st.to(policy.device)
+    if mdl == 'multiswag':
+        sample(learned_model.dynamics_net, param_dict, diag_noise = True, device='cuda')
     for t in range(horizon):
         # TODO(Aravind): Below assumes gaussian policy. Instead expand the get_action function
         # in the policy class to make this more generally applicable.
@@ -80,8 +83,16 @@ def policy_rollout(
         at = enforce_tensor_bounds(at, a_min, a_max, large_value)
         if mdl == 'ensemble' or mdl == 'swag_ens':
             stp1 = learned_model.forward(st, at)
-        elif mdl == 'swag' or mdl == 'multiswag':
-            stp1 = learned_model.forward_swag(st, at, param_dict)
+        elif mdl == 'swag' :
+            #if t % 20 == 0:
+            #    sample(learned_model.dynamics_net, param_dict, diag_noise = True, device='cuda')
+            #stp1 = learned_model.forward(st,at)            
+            stp1 = learned_model.forward_swag(st, at, param_dict, diag_noise = False)
+        elif mdl == 'multiswag':
+            #if t % 10 == 0:
+            #    sample(learned_model.dynamics_net, param_dict, diag_noise = True, device='cuda')
+
+            stp1 = learned_model.forward(st,at)
 
         stp1 = enforce_tensor_bounds(stp1, s_min, s_max, large_value)
         obs.append(st.to('cpu').data.numpy())
@@ -244,7 +255,7 @@ def generate_paths(num_traj, learned_model, start_state, base_act, filter_coefs,
 
 
 def evaluate_policy(e, policy, learned_model, noise_level=0.0,
-                    real_step=False, num_episodes=10, visualize=False):
+                    real_step=False, num_episodes=10, visualize=False, param_dict=None):
     # rollout the policy on env and record performance
     paths = []
     for ep in range(num_episodes):
@@ -257,6 +268,7 @@ def evaluate_policy(e, policy, learned_model, noise_level=0.0,
         done = False
         while t < e.horizon and done is False:
             o = e.get_obs()
+            #print(f'o shape {o.shape}')
             ifo = e.get_env_infos()
             a = policy.get_action(o)
             if type(a) == list:
@@ -264,7 +276,13 @@ def evaluate_policy(e, policy, learned_model, noise_level=0.0,
             if noise_level > 0.0:
                 a = a + e.env.env.np_random.uniform(low=-noise_level, high=noise_level, size=a.shape[0])
             if real_step is False:
-                next_s = learned_model.predict(o, a)
+                #next_s = learned_model.predict(o, a)
+                print('real_step is False')
+                pred = []
+                for model in learned_model:
+                    pred += model.swag_predict(param_dict, o,a)
+                next_s = np.mean(pred, axis=0)
+
                 r = 0.0 # temporarily
                 e.env.env.set_fitted_state(next_s)
             else:
@@ -278,6 +296,7 @@ def evaluate_policy(e, policy, learned_model, noise_level=0.0,
             actions.append(a)
             rewards.append(r)
             env_infos.append(ifo)
+
 
         path = dict(observations=np.array(observations), actions=np.array(actions),
                     rewards=np.array(rewards),

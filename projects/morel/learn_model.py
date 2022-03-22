@@ -85,21 +85,27 @@ num_samples = np.sum([p['rewards'].shape[0] for p in paths])
 if args.mdl == 'ensemble': 
     for i, model in enumerate(models):
         dynamics_loss = model.fit_dynamics(s, a, sp, **job_data)
-        loss_general = model.compute_loss(s, a, sp) # generalization error
-        if job_data['learn_reward']:
-            reward_loss = model.fit_reward(s, a, r.reshape(-1, 1), **job_data)
+        #loss_general = model.compute_loss(s, a, sp) # generalization error
+        #if job_data['learn_reward']:
+        #    reward_loss = model.fit_reward(s, a, r.reshape(-1, 1), **job_data)
 elif args.mdl == 'swag':
     for i, model in enumerate(models):
         dynamics_loss, param_dict = model.fit_dynamics_swag(s, a, sp, **job_data)
         print(f'swa {param_dict["theta_swa"].shape}, sigma_diag {param_dict["sigma_diag"].shape}, D {param_dict["D"].shape},K {param_dict["K"]}')
         pickle.dump(param_dict, open(args.param_dict_fname, 'wb'))
-        loss_general = model.compute_loss(s, a, sp) # generalization error
-        if job_data['learn_reward']:
-            reward_loss = model.fit_reward(s, a, r.reshape(-1, 1), **job_data)
+        #loss_general = model.compute_loss(s, a, sp) # generalization error
+        #if job_data['learn_reward']:
+        #    reward_loss = model.fit_reward(s, a, r.reshape(-1, 1), **job_data)
 elif args.mdl == 'swag_ens':
     dynamics_loss, param_dict_ens = models[0].fit_dynamics_swag(s, a, sp, **job_data)
+    params1 = models[0].dynamics_net.named_parameters()
+
     pickle.dump(param_dict_ens, open(args.param_dict_fname, 'wb'))
     for i, model in enumerate(models):
+        model_dict = dict(model.dynamics_net.named_parameters)
+        for name1, param1 in params1:
+            if name1 in model_dict:
+                model_dict[name1].data.copy_(param1.data)
         sample(model.dynamics_net, param_dict_ens, diag_noise = True, device='cuda')
         if job_data['learn_reward']:
             reward_loss = model.fit_reward(s, a, r.reshape(-1, 1), **job_data)
@@ -109,7 +115,7 @@ elif args.mdl == 'multiswag':
         dynamics_loss, param_dict = model.fit_dynamics_swag(s, a, sp, **job_data)
         print(f'swa {param_dict["theta_swa"].shape}, sigma_diag {param_dict["sigma_diag"].shape}, D {param_dict["D"].shape},K {param_dict["K"]}')
         pickle.dump(param_dict, open(f'{args.param_dict_fname}{i}', 'wb'))
-        loss_general = model.compute_loss(s, a, sp) # generalization error
-        if job_data['learn_reward']:
-            reward_loss = model.fit_reward(s, a, r.reshape(-1, 1), **job_data)
+        #loss_general = model.compute_loss(s, a, sp) # generalization error
+        #if job_data['learn_reward']:
+        #    reward_loss = model.fit_reward(s, a, r.reshape(-1, 1), **job_data)
 pickle.dump(models, open(args.output, 'wb'))
