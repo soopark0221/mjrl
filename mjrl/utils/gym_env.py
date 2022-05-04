@@ -4,6 +4,8 @@ Wrapper around a gym env that provides convenience functions
 
 import gym
 import numpy as np
+#from gym_minigrid.wrappers import *
+
 
 
 class EnvSpec(object):

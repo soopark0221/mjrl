@@ -84,10 +84,21 @@ def policy_rollout(
         if mdl == 'ensemble' or mdl == 'swag_ens':
             stp1 = learned_model.forward(st, at)
         elif mdl == 'swag' :
-            #if t % 20 == 0:
-            #    sample(learned_model.dynamics_net, param_dict, diag_noise = True, device='cuda')
-            #stp1 = learned_model.forward(st,at)            
-            stp1 = learned_model.forward_swag(st, at, param_dict, diag_noise = False)
+            '''
+            stp1 = None
+            # stp1 = torch.zeros(size).to(device)
+            print(t, 1)
+            for i in range(4):
+                print(t, i)
+                if stp1 is not None:
+                    stp1 += learned_model.forward_swag(st, at, param_dict, diag_noise=True)/4
+                else:
+                    stp1 = learned_model.forward_swag(st, at, param_dict, diag_noise=True)/4
+            '''
+            #stp1 = learned_model.forward(st, at)            
+
+            stp1 = learned_model.forward_swag(st, at, param_dict, diag_noise=True)            
+            
         elif mdl == 'multiswag':
             #if t % 10 == 0:
             #    sample(learned_model.dynamics_net, param_dict, diag_noise = True, device='cuda')
@@ -276,13 +287,16 @@ def evaluate_policy(e, policy, learned_model, noise_level=0.0,
             if noise_level > 0.0:
                 a = a + e.env.env.np_random.uniform(low=-noise_level, high=noise_level, size=a.shape[0])
             if real_step is False:
-                #next_s = learned_model.predict(o, a)
-                print('real_step is False')
-                pred = []
-                for model in learned_model:
-                    pred += model.swag_predict(param_dict, o,a)
-                next_s = np.mean(pred, axis=0)
+                #print('real_step is False')
+                #pred = []
+                #for model in learned_model:
+                #    pred += model.swag_predict(param_dict, o,a)
+                #next_s = np.mean(pred, axis=0)
 
+                #r = 0.0 # temporarily
+                #e.env.env.set_fitted_state(next_s)
+
+                next_s = learned_model.predict(o, a)
                 r = 0.0 # temporarily
                 e.env.env.set_fitted_state(next_s)
             else:
@@ -296,7 +310,6 @@ def evaluate_policy(e, policy, learned_model, noise_level=0.0,
             actions.append(a)
             rewards.append(r)
             env_infos.append(ifo)
-
 
         path = dict(observations=np.array(observations), actions=np.array(actions),
                     rewards=np.array(rewards),

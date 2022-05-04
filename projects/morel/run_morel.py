@@ -303,16 +303,11 @@ for outer_iter in range(job_data['num_iter']):
     logger.log_kv('train_score', train_stats[0])
     agent.policy.to('cpu')
     
-    # evaluate true policy performance
     if job_data['eval_rollouts'] > 0:
         print("Performing validation rollouts ... ")
         # set the policy device back to CPU for env sampling
-        #eval_paths = evaluate_policy(agent.env, agent.policy, agent.learned_model[0], noise_level=0.0,
-        #                             real_step=True, num_episodes=job_data['eval_rollouts'], visualize=False)
-        eval_paths = evaluate_policy(agent.env, agent.policy, agent.learned_model, noise_level=0.0,
+        eval_paths = evaluate_policy(agent.env, agent.policy, agent.learned_model[0], noise_level=0.0,
                                      real_step=True, num_episodes=job_data['eval_rollouts'], visualize=False)
-        print(f'len eval path {len(eval_paths)}')
-        print(f'single path reward len {len(eval_paths[0]["rewards"])}')
         eval_score = np.mean([np.sum(p['rewards']) for p in eval_paths])
         logger.log_kv('eval_score', eval_score)
         try:

@@ -4,7 +4,7 @@
 
 'env_name'      :   'Hopper-v3',
 'act_repeat'    :   1,
-'seed'          :   123,
+'seed'          :   2,
 'num_iter'      :   500,
 'eval_rollouts' :   4,
 'num_models'    :   4,
@@ -15,7 +15,7 @@
 'reward_file'   :   '../model_based_npg/utils/reward_functions/gym_hopper.py',
 'model_file'    :   'hopper-medium-v0-models.pickle',
 'bc_init'       :   True,
-'pessimism_coef':   2.0,
+'pessimism_coef':   1.5,
 'truncate_reward' : 0.0,
 'exp_notes'     :   'Example to illustrate MOReL on a D4RL task.',
 
@@ -26,24 +26,25 @@
 'fit_lr'        :   1e-3,
 'fit_wd'        :   0.0,
 'fit_mb_size'   :   256,
-'fit_epochs'    :   300,
+'fit_epochs'    :   400,
 'refresh_fit'   :   False,
 'max_steps'     :   1e8,
-'swag_start'    :   200,
+'swag_start'    :   300,
 'swag_c_epochs' :   1,
 'max_rank'      :   20,
+
 
 # NPG params
 
 'policy_size'   :   (32, 32),
 'step_size'     :   0.02,
 'init_log_std'  :   -0.25,
-'min_log_std'   :   -1.0,
+'min_log_std'   :   -2.0,
 'gamma'         :   0.999,
 'gae_lambda'    :   0.97,
 'update_paths'  :   50,
 'start_state'   :   'init',
-'horizon'       :   700,
+'horizon'       :   400,
 'npg_hp'        :   dict(FIM_invert_args={'iters': 20, 'damping': 1e-3}),
 
 }

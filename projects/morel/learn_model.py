@@ -102,13 +102,15 @@ elif args.mdl == 'swag_ens':
 
     pickle.dump(param_dict_ens, open(args.param_dict_fname, 'wb'))
     for i, model in enumerate(models):
-        model_dict = dict(model.dynamics_net.named_parameters)
-        for name1, param1 in params1:
-            if name1 in model_dict:
-                model_dict[name1].data.copy_(param1.data)
-        sample(model.dynamics_net, param_dict_ens, diag_noise = True, device='cuda')
-        if job_data['learn_reward']:
-            reward_loss = model.fit_reward(s, a, r.reshape(-1, 1), **job_data)
+        model.dynamics_net = sample(models[0].dynamics_net,param_dict_ens, diag_noise = True, device='cuda')
+        print(model.dynamics_net.parameters())
+        #model_dict = dict(model.dynamics_net.named_parameters)
+        #for name1, param1 in params1:
+        #    if name1 in model_dict:
+        #        model_dict[name1].data.copy_(param1.data)
+        #sample(model.dynamics_net, param_dict_ens, diag_noise = True, device='cuda')
+        #if job_data['learn_reward']:
+        #    reward_loss = model.fit_reward(s, a, r.reshape(-1, 1), **job_data)
 
 elif args.mdl == 'multiswag':
     for i, model in enumerate(models):

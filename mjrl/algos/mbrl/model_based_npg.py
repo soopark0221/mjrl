@@ -155,7 +155,6 @@ class ModelBasedNPG(NPG):
                 rollouts = policy_rollout(num_traj=N, env=env, policy=self.policy,
                                         learned_model=self.learned_model[0], eval_mode=False, horizon=horizon,
                                         init_state=init_states, seed=None, mdl=self.mdl, param_dict=self.param_dict)
-                #print(f'roll {rollouts}')
                 print(f'roll {rollouts["observations"].shape}')
 
                 # use learned reward function if available
@@ -210,13 +209,12 @@ class ModelBasedNPG(NPG):
 
         T_avg = 0
         # additional truncation based on error in the ensembles
-        '''
         if self.mdl == 'ensemble' or self.mdl == 'swag_ens':
             if truncate_lim is not None and len(self.learned_model) > 1:
                 print(self.mdl, len(self.learned_model))
                 for path in paths:
                     pred_err = np.zeros(path['observations'].shape[0] - 1)
-                    print(f'pred_err initial shape {pred_err.shape}')
+                    #print(f'pred_err initial shape {pred_err.shape}')
                     s = path['observations'][:-1]
 
                     a = path['actions'][:-1]
@@ -243,6 +241,7 @@ class ModelBasedNPG(NPG):
         elif self.mdl == 'swag' or self.mdl == 'multiswag':
         #swag
             if truncate_lim is not None and len(self.learned_model) > 0:
+                print(self.mdl, len(self.learned_model))
                 for path in paths:
                     pred_err = np.zeros(path['observations'].shape[0] - 1)
                     s = path['observations'][:-1]
@@ -274,7 +273,6 @@ class ModelBasedNPG(NPG):
                     if truncated: path["rewards"][-1] += truncate_reward
                     path["terminated"] = False if T == path['observations'].shape[0] else True   
             
-        '''
         if self.save_logs:
             self.logger.log_kv('time_sampling', timer.time() - ts)
         try: 
@@ -283,7 +281,6 @@ class ModelBasedNPG(NPG):
         except :
             print('path error')
         self.seed = self.seed + N if self.seed is not None else self.seed
-
         # compute returns
         process_samples.compute_returns(paths, gamma)
         # compute advantages

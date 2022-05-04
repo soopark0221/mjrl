@@ -13,7 +13,7 @@ import d4rl
 import mjrl.samplers.core as sampler
 from mjrl.utils.gym_env import GymEnv
 from mjrl.utils.tensor_utils import d4rl2paths
-
+#import d4rl_utils
 # ===============================================================================
 # Get command line arguments
 # ===============================================================================
@@ -24,6 +24,7 @@ parser.add_argument('--act_repeat', type=int, default=1, help='action repeat, wi
 parser.add_argument('--include', type=str, default=None, help='a file to include (can contain imports and function definitions)')
 parser.add_argument('--header', type=str, required=False, help='header commands to execute (can include imports)')
 parser.add_argument('--seed', type=int, default=123, help='random seed for sampling')
+parser.add_argument('--ds', type=str, default=None, help='env file name if not in d4rl')
 
 args = parser.parse_args()
 if args.header: exec(args.header)
@@ -44,7 +45,10 @@ if args.include:
     exec("from "+filename+" import *")
 if 'obs_mask' in globals(): e.obs_mask = obs_mask
 
-dataset = e.env.env.get_dataset()
+if args.ds:
+    dataset = e.env.env.d4rl_utils.get_dataset()
+else: 
+    dataset = e.env.env.get_dataset()
 raw_paths = d4rl2paths(dataset)
 
 # print some statistics
@@ -69,5 +73,6 @@ for p in raw_paths:
     path['actions'] = act
     path['rewards'] = rew
     paths.append(path)
-
+#print(raw_paths[0])
+#print(paths[0])
 pickle.dump(paths, open(args.output, 'wb'))
