@@ -7,6 +7,7 @@ import multiprocessing as mp
 import time as timer
 import torch
 logging.disable(logging.CRITICAL)
+from mjrl.algos.mbrl.nn_dynamics import sample
 
 
 # ===========================================================
@@ -28,6 +29,8 @@ def policy_rollout(
         a_min=None,
         a_max=None,
         large_value=float(1e2),
+        mdl = None,
+        param_dict = None
         ):
     
     # Only CPU rollouts are currently supported.
@@ -68,6 +71,8 @@ def policy_rollout(
     obs = []
     act = []
     st = st.to(policy.device)
+    if mdl == 'multiswag':
+        sample(learned_model.dynamics_net, param_dict, diag_noise = True, device='cuda')
     for t in range(horizon):
         # TODO(Aravind): Below assumes gaussian policy. Instead expand the get_action function
         # in the policy class to make this more generally applicable.
@@ -76,11 +81,36 @@ def policy_rollout(
             at = at + torch.randn(at.shape).to(policy.device) * torch.exp(policy.log_std)
         # clamp states and actions to avoid blowup
         at = enforce_tensor_bounds(at, a_min, a_max, large_value)
-        stp1 = learned_model.forward(st, at)
+        if mdl == 'ensemble' or mdl == 'swag_ens':
+            stp1 = learned_model.forward(st, at)
+        elif mdl == 'swag' :
+            '''
+            stp1 = None
+            # stp1 = torch.zeros(size).to(device)
+            print(t, 1)
+            for i in range(4):
+                print(t, i)
+                if stp1 is not None:
+                    stp1 += learned_model.forward_swag(st, at, param_dict, diag_noise=True)/4
+                else:
+                    stp1 = learned_model.forward_swag(st, at, param_dict, diag_noise=True)/4
+            '''
+            #stp1 = learned_model.forward(st, at)            
+
+            stp1 = learned_model.forward_swag(st, at, param_dict, diag_noise=True)            
+            
+        elif mdl == 'multiswag':
+            #if t % 10 == 0:
+            #    sample(learned_model.dynamics_net, param_dict, diag_noise = True, device='cuda')
+
+            stp1 = learned_model.forward(st,at)
+
         stp1 = enforce_tensor_bounds(stp1, s_min, s_max, large_value)
         obs.append(st.to('cpu').data.numpy())
         act.append(at.to('cpu').data.numpy())
         st = stp1
+
+
 
     obs = np.array(obs)
     obs = np.swapaxes(obs, 0, 1)  # (num_traj, horizon, state_dim)
@@ -236,7 +266,7 @@ def generate_paths(num_traj, learned_model, start_state, base_act, filter_coefs,
 
 
 def evaluate_policy(e, policy, learned_model, noise_level=0.0,
-                    real_step=False, num_episodes=10, visualize=False):
+                    real_step=False, num_episodes=10, visualize=False, param_dict=None):
     # rollout the policy on env and record performance
     paths = []
     for ep in range(num_episodes):
@@ -249,6 +279,7 @@ def evaluate_policy(e, policy, learned_model, noise_level=0.0,
         done = False
         while t < e.horizon and done is False:
             o = e.get_obs()
+            #print(f'o shape {o.shape}')
             ifo = e.get_env_infos()
             a = policy.get_action(o)
             if type(a) == list:
@@ -256,6 +287,15 @@ def evaluate_policy(e, policy, learned_model, noise_level=0.0,
             if noise_level > 0.0:
                 a = a + e.env.env.np_random.uniform(low=-noise_level, high=noise_level, size=a.shape[0])
             if real_step is False:
+                #print('real_step is False')
+                #pred = []
+                #for model in learned_model:
+                #    pred += model.swag_predict(param_dict, o,a)
+                #next_s = np.mean(pred, axis=0)
+
+                #r = 0.0 # temporarily
+                #e.env.env.set_fitted_state(next_s)
+
                 next_s = learned_model.predict(o, a)
                 r = 0.0 # temporarily
                 e.env.env.set_fitted_state(next_s)

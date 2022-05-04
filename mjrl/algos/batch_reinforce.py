@@ -189,6 +189,7 @@ class BatchREINFORCE:
         advantages = (advantages - np.mean(advantages)) / (np.std(advantages) + 1e-6)
 
         # cache return distributions for the paths
+        #print(f'process path return path output : {paths[0]} {paths[0]["rewards"]} {sum(paths[0]["rewards"])}')
         path_returns = [sum(p["rewards"]) for p in paths]
         mean_return = np.mean(path_returns)
         std_return = np.std(path_returns)

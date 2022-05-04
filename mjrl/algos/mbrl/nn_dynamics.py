@@ -2,12 +2,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 from tqdm import tqdm
-
+import copy
 
 class WorldModel:
     def __init__(self, state_dim, act_dim,
                  learn_reward=False,
-                 hidden_size=(64,64),
+                 hidden_size=(64,64,128),
                  seed=123,
                  fit_lr=1e-3,
                  fit_wd=0.0,
@@ -24,9 +24,10 @@ class WorldModel:
         self.dynamics_net = DynamicsNet(state_dim, act_dim, hidden_size, residual=residual, seed=seed).to(self.device)
         self.dynamics_net.set_transformations()  # in case device is different from default, it will set transforms correctly
         if activation == 'tanh' : self.dynamics_net.nonlinearity = torch.tanh
-        self.dynamics_opt = torch.optim.Adam(self.dynamics_net.parameters(), lr=fit_lr, weight_decay=fit_wd)
+        self.dynamics_opt = torch.optim.Adam(self.dynamics_net.parameters(), lr=fit_lr, weight_decay=fit_wd) #Adam to SGD
         self.dynamics_loss = torch.nn.MSELoss()
         # construct the reward model if necessary
+        self.new_model = copy.deepcopy(self.dynamics_net)
         if self.learn_reward:
             # small network for reward is sufficient if we augment the inputs with next state predictions
             self.reward_net = RewardNet(state_dim, act_dim, hidden_size=(100, 100), seed=seed).to(self.device)
@@ -53,6 +54,17 @@ class WorldModel:
         a = a.to(self.device)
         return self.dynamics_net.forward(s, a)
 
+    def forward_swag(self, s, a, param_dict, diag_noise = True):
+        if type(s) == np.ndarray:
+            s = torch.from_numpy(s).float()
+        if type(a) == np.ndarray:
+            a = torch.from_numpy(a).float()
+        s = s.to(self.device)
+        a = a.to(self.device)
+        new_model = sample(self.dynamics_net, param_dict, diag_noise, device=self.device)
+        return new_model.forward(s, a)
+
+
     def predict(self, s, a):
         s = torch.from_numpy(s).float()
         a = torch.from_numpy(a).float()
@@ -61,6 +73,22 @@ class WorldModel:
         s_next = self.dynamics_net.forward(s, a)
         s_next = s_next.to('cpu').data.numpy()
         return s_next
+    
+    def swag_predict(self, param_dict, s, a):
+        preds = []
+        s = torch.from_numpy(s).float()
+        a = torch.from_numpy(a).float()
+        s = s.to(self.device)
+        a = a.to(self.device)
+
+        for i in range(4):
+            #sample(self.dynamics_net, param_dict, diag_noise = True, device=self.device)
+            #s_next = self.dynamics_net.forward(s, a)
+            new_model = sample(self.dynamics_net, param_dict, diag_noise=True, device=self.device)
+            s_next = new_model.forward(s,a)
+            s_next = s_next.to('cpu').data.numpy()
+            preds.append(s_next)
+        return preds
 
     def reward(self, s, a):
         if not self.learn_reward:
@@ -102,7 +130,7 @@ class WorldModel:
             out_shift = torch.mean(sp-s, dim=0) if self.dynamics_net.residual else torch.mean(sp, dim=0)
             out_scale = torch.mean(torch.abs(sp-s-out_shift), dim=0) if self.dynamics_net.residual else torch.mean(torch.abs(sp-out_shift), dim=0)
             self.dynamics_net.set_transformations(s_shift, s_scale, a_shift, a_scale, out_shift, out_scale)
-
+        
         # prepare dataf for learning
         if self.dynamics_net.residual:  
             X = (s, a) ; Y = (sp - s - out_shift) / (out_scale + 1e-8)
@@ -115,6 +143,33 @@ class WorldModel:
         self.dynamics_net._apply_out_transforms = True
         return return_vals
 
+    def fit_dynamics_swag(self, s, a, sp, swag_start, swag_c_epochs, max_rank, fit_mb_size, fit_epochs, \
+                        max_steps=1e4,set_transofrmations=True, *args, **kwargs):
+        assert type(s) == type(a) == type(sp)
+        assert s.shape[0] == a.shape[0] == sp.shape[0]
+        if type(s) == np.ndarray:
+            s = torch.from_numpy(s).float()
+            a = torch.from_numpy(a).float()
+            sp = torch.from_numpy(sp).float()
+        s = s.to(self.device); a = a.to(self.device); sp = sp.to(self.device)
+
+        if set_transofrmations:
+            s_shift, a_shift = torch.mean(s, dim=0), torch.mean(a, dim=0)
+            s_scale, a_scale = torch.mean(torch.abs(s - s_shift), dim=0), torch.mean(torch.abs(a - a_shift), dim=0)
+            out_shift = torch.mean(sp-s, dim=0) if self.dynamics_net.residual else torch.mean(sp, dim=0)
+            out_scale = torch.mean(torch.abs(sp-s-out_shift), dim=0) if self.dynamics_net.residual else torch.mean(torch.abs(sp-out_shift), dim=0)
+            self.dynamics_net.set_transformations(s_shift, s_scale, a_shift, a_scale, out_shift, out_scale)
+        if self.dynamics_net.residual:  
+            X = (s, a) ; Y = (sp - s - out_shift) / (out_scale + 1e-8)
+        else:
+            X = (s, a) ; Y = (sp - out_shift) / (out_scale + 1e-8)
+        # disable output transformations to learn in the transformed space
+        self.dynamics_net._apply_out_transforms = False
+        return_vals, param_dict =  fit_model_swag(swag_start, swag_c_epochs, max_rank, self.dynamics_net, X, Y, self.dynamics_opt, self.dynamics_loss,
+                                 fit_mb_size, fit_epochs, max_steps=max_steps)
+        self.dynamics_net._apply_out_transforms = True
+        return return_vals, param_dict
+        
     def fit_reward(self, s, a, r, fit_mb_size, fit_epochs, max_steps=1e4, 
                    set_transformations=True, *args, **kwargs):
         if not self.learn_reward:
@@ -165,7 +220,7 @@ class WorldModel:
 
 
 class DynamicsNet(nn.Module):
-    def __init__(self, state_dim, act_dim, hidden_size=(64,64),
+    def __init__(self, state_dim, act_dim, hidden_size=(64,64,128),
                  s_shift = None,
                  s_scale = None,
                  a_shift = None,
@@ -364,6 +419,9 @@ def fit_model(nn_model, X, Y, optimizer, loss_func,
     num_samples = Y.shape[0]
     epoch_losses = []
     steps_so_far = 0
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size = 10, gamma=0.6)
+    saved_before = False
+    sgd_epoch_losses = []
     for ep in tqdm(range(epochs)):
         rand_idx = torch.LongTensor(np.random.permutation(num_samples)).to(device)
         ep_loss = 0.0
@@ -380,7 +438,156 @@ def fit_model(nn_model, X, Y, optimizer, loss_func,
             ep_loss += loss.to('cpu').data.numpy()
         epoch_losses.append(ep_loss * 1.0/num_steps)
         steps_so_far += num_steps
+        #if ep < epochs//2:
+        #    scheduler.step()
         if steps_so_far >= max_steps:
             print("Number of grad steps exceeded threshold. Terminating early..")
             break
+        
+        if loss <= 0.001 and saved_before == False:
+            print(f'epoch : {ep}')
+            saved_before = True
+            torch.save({'model': nn_model.state_dict(), 'optim':optimizer.state_dict()}, 'adam_model.pt')
+            state_dict = torch.load('adam_model.pt')
+            nn_model.load_state_dict(state_dict['model'])
+            optimizer = torch.optim.SGD(nn_model.parameters(), 0.00001)            
+
+        if ep >= 260:
+            sgd_epoch_losses.append(loss)
     return epoch_losses
+
+def flatten(lst):
+    tmp = [i.contiguous().view(-1,1) for i in lst]
+    return torch.cat(tmp).view(-1)
+
+def set_weights(model, vector, device=None):
+    offset = 0
+    for param in model.parameters():
+        param.data.copy_(vector[offset:offset + param.numel()].view(param.size()).to(device))
+        offset += param.numel()
+
+def collect_vector(vector, rank, max_rank, cov_mat_sqrt):
+    if rank.item() + 1 > max_rank:
+        cov_mat_sqrt = cov_mat_sqrt[1:, :]
+    cov_mat_sqrt = torch.cat((cov_mat_sqrt, vector.view(1, -1)), dim=0)
+    rank = torch.min(rank + 1, torch.as_tensor(max_rank)).view(-1)
+
+def fit_model_swag(swag_start, swag_c_epochs, max_rank, nn_model, X, Y, optimizer, loss_func,
+              batch_size, epochs, max_steps=1e10):
+    assert type(X) == tuple
+    for d in X: assert type(d) == torch.Tensor
+    assert type(Y) == torch.Tensor
+    device = Y.device
+    for d in X: assert d.device == device
+
+    num_samples = Y.shape[0]
+    epoch_losses = []
+    steps_so_far = 0
+    num_param =  sum(param.numel() for param in nn_model.parameters())
+    first_moment = torch.zeros(num_param) #flatten([param.detach().cpu() for param in nn_model.parameters()]) # torch.zeros(num_param) 275979
+    second_moment = torch.square(first_moment)
+    cov_mat_sqrt = np.empty((first_moment.shape[0], 0)) #numpy 
+    cov_mat_sqrt = torch.empty(0, first_moment.shape[0], dtype=torch.float32) # tensor
+    n = 1
+    rank = torch.zeros(1, dtype=torch.long)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size = 10, gamma=0.6)
+    saved_before = False
+    sgd_epoch_losses= []
+    for ep in tqdm(range(epochs)):
+        rand_idx = torch.LongTensor(np.random.permutation(num_samples)).to(device)
+        ep_loss = 0.0
+        num_steps = int(num_samples // batch_size)
+        for mb in range(num_steps):
+            data_idx = rand_idx[mb*batch_size:(mb+1)*batch_size]
+            batch_X  = [d[data_idx] for d in X]
+            batch_Y  = Y[data_idx]
+            optimizer.zero_grad()
+            Y_hat    = nn_model.forward(*batch_X)
+            loss = loss_func(Y_hat, batch_Y)
+            loss.backward()
+            optimizer.step()
+            ep_loss += loss.to('cpu').data.numpy()
+        epoch_losses.append(ep_loss * 1.0/num_steps)
+        steps_so_far += num_steps
+
+        if (ep+ 1) > swag_start and (ep + 1 - swag_start) % swag_c_epochs == 0:
+            w = flatten([param.detach().cpu() for param in nn_model.parameters()])
+            first_moment.mul_(n/(n+1))
+            first_moment.add_(w/(n+1))
+            second_moment.mul_(n/(n+1))
+            second_moment.add_(w**2/(n+1))
+            n+=1            
+            dev_vector = w-first_moment
+            if rank.item() + 1 > max_rank:
+                cov_mat_sqrt = cov_mat_sqrt[1:, :]
+            cov_mat_sqrt = torch.cat((cov_mat_sqrt, dev_vector.view(1, -1)), dim=0)
+            rank = torch.min(rank + 1, torch.as_tensor(max_rank)).view(-1)
+        #if ep < epochs//2:
+        #    scheduler.step()
+
+        if steps_so_far >= max_steps:
+            print("Number of grad steps exceeded threshold. Terminating early..")
+            break
+
+        
+        if loss <= 0.001 and saved_before == False:
+            print(f'epoch : {ep}')
+            saved_before = True
+            torch.save({'model': nn_model.state_dict(), 'optim':optimizer.state_dict()}, 'adam_model.pt')
+            state_dict = torch.load('adam_model.pt')
+            nn_model.load_state_dict(state_dict['model'])
+            optimizer = torch.optim.SGD(nn_model.parameters(), 0.00001)            
+
+        if ep >= 260:
+            sgd_epoch_losses.append(loss)
+    print(f'sgdloss {sgd_epoch_losses}')
+    param_dict = {}
+    param_dict['theta_swa'] = first_moment
+    param_dict['sigma_diag'] = second_moment - first_moment**2
+    param_dict['D'] = cov_mat_sqrt
+    param_dict['K'] = max_rank  
+    
+    '''
+    # evaluation
+    num_steps = int(num_samples // batch_size)
+    val_avg_loss = 0
+    for mb in range(num_steps):
+        data_idx = rand_idx[mb*batch_size:(mb+1)*batch_size]
+        batch_X  = [d[data_idx] for d in X]
+        batch_Y  = Y[data_idx]
+        sample(nn_model,param_dict)
+        Y_hat    = nn_model.forward(*batch_X)
+        val_loss = loss_func(Y_hat, batch_Y)
+        #print(f'validation loss {val_loss}')
+        val_avg_loss += val_loss
+    print(f'val avg loss {val_avg_loss/num_steps}')
+    '''
+    return epoch_losses, param_dict
+
+
+def set_weights(model, vector, device=None):
+    offset = 0
+    for param in model.parameters():
+        param.data.copy_(vector[offset:offset + param.numel()].view(param.size()).to(device))
+        offset += param.numel()
+
+
+def sample(nn_model, param_dict, diag_noise = False, device=None):
+    new_d = param_dict['D']/((param_dict['K'] - 1) ** 0.5)
+    variance = torch.clamp(param_dict['sigma_diag'], 1e-6)
+    z2 = torch.randn(param_dict['K'])
+    z = new_d.t() @ z2
+    if diag_noise:
+        #diag = variance.sqrt()*torch.randn_like(variance)
+        z+= variance.sqrt()*torch.randn_like(variance)
+    z*= 1/(4**0.5) #could change 2
+    #diag *= 1/(2**0.5)
+    new_w = param_dict['theta_swa'] + z
+
+    new_model = copy.deepcopy(nn_model)
+    #print(next(new_model.parameters()).data)
+    #set_weights(nn_model, new_w, device)
+    set_weights(new_model, new_w, device)
+
+    return new_model
+
